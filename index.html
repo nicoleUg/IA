@@ -1,0 +1,570 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Entrenador IA - Teachable Machine Pose</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #1a1a2e;
+            color: #fff;
+            text-align: center;
+            margin: 0;
+            padding: 20px;
+        }
+        h1 {
+            color: #4ecca3;
+        }
+        #main-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 20px;
+            margin-top: 20px;
+        }
+        button {
+            padding: 12px 24px;
+            font-size: 18px;
+            font-weight: bold;
+            background-color: #e94560;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: 0.3s;
+        }
+        button:hover {
+            background-color: #d13050;
+        }
+        #canvas-wrapper {
+            position: relative;
+            display: inline-block;
+            border: 5px solid #0f3460;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 8px 16px rgba(0,0,0,0.5);
+        }
+        #feedback-panel {
+            width: 600px;
+            padding: 20px;
+            font-size: 22px;
+            font-weight: bold;
+            border-radius: 10px;
+            background-color: #333;
+            transition: background-color 0.3s;
+        }
+        #label-container {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+            background: #0f3460;
+            padding: 15px;
+            border-radius: 8px;
+            width: 300px;
+        }
+        .class-label {
+            margin: 5px 0;
+            font-size: 16px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Verificador Gym IA (Teachable Machine Pose)</h1>
+    <p>Detecta automáticamente qué ejercicio haces y verifica tu postura en tiempo real.</p>
+    
+    <div id="main-container">
+        <div>
+            <button type="button" onclick="init()">Activar Cámara e IA</button>
+            <button type="button" onclick="stop()" style="background-color:#555;margin-left:10px;">Detener</button>
+        </div>
+        
+        <div id="canvas-wrapper">
+            <canvas id="canvas"></canvas>
+        </div>
+
+        <!-- Panel principal de correcciones (se pone Verde o Rojo) -->
+        <div id="feedback-panel">Esperando a iniciar...</div>
+        
+        <!-- Panel secundario que muestra las probabilidades del modelo -->
+        <div id="label-container"></div>
+
+        <div id="debug" style="font-size:14px;opacity:0.85;max-width:700px;">
+            
+        </div>
+    </div>
+
+    <!-- Librerías oficiales de TensorFlow.js y Teachable Machine Pose -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@1.3.1/dist/tf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/pose@0.8/dist/teachablemachine-pose.min.js"></script>
+    
+    <script type="text/javascript">
+        // La ruta donde están tus archivos (model.json, metadata.json, weights.bin)
+        const URL = "./"; 
+        
+        let model, webcam, ctx, labelContainer, maxPredictions;
+        let feedbackPanel = document.getElementById("feedback-panel");
+        let debugEl = document.getElementById("debug");
+
+        // Control de ejecución (evita congelamientos)
+        let running = false;
+        let predicting = false;
+        let rafId = null;
+        let lastUiUpdateMs = 0;
+
+        // Limitar FPS para no saturar CPU/GPU (PoseNet es pesado)
+        const TARGET_FPS = 8;
+        const FRAME_MS = Math.floor(1000 / TARGET_FPS);
+        let lastFrameMs = 0;
+
+        // Estabilización de predicción (evita que siempre marque "curl")
+        const SMOOTH_ALPHA = 0.35; // 0..1 (más alto = reacciona más rápido)
+        const MIN_TOP1_CONF = 0.72;
+        const MIN_TOP1_MARGIN = 0.10; // top1 - top2
+        const POSE_QUALITY_MIN = 0.35; // promedio de score de puntos clave
+
+        let smoothedProbs = null; // Array<number>
+        let lockedExercise = null; // string
+        let stableCandidate = null;
+        let stableCount = 0;
+        const STABLE_FRAMES_REQUIRED = 3;
+
+        async function init() {
+            if (running) return;
+            const modelURL = URL + "model.json";
+            const metadataURL = URL + "metadata.json";
+
+            feedbackPanel.innerHTML = "Cargando cerebro de IA...";
+            feedbackPanel.style.backgroundColor = "#e4a11b"; // Naranja
+
+            try {
+                // Backend: permite workaround si webgl congela (usar ?backend=cpu)
+                const params = new URLSearchParams(window.location.search);
+                const requestedBackend = (params.get("backend") || "webgl").toLowerCase();
+                try {
+                    if (requestedBackend === "cpu") {
+                        await tf.setBackend("cpu");
+                    } else {
+                        await tf.setBackend("webgl");
+                    }
+                    await tf.ready();
+                } catch (e) {
+                    // si falla, seguimos con el backend por defecto
+                }
+
+                // 1. Cargar el modelo
+                model = await tmPose.load(modelURL, metadataURL);
+                maxPredictions = model.getTotalClasses();
+
+                // 2. Configurar la cámara web
+                // Mantener resolución moderada evita trabas (500px es pesado)
+                const size = 320;
+                const flip = true; // Efecto espejo
+                webcam = new tmPose.Webcam(size, size, flip);
+                await webcam.setup(); 
+                await webcam.play();
+                running = true;
+                rafId = window.requestAnimationFrame(loop);
+
+                // 3. Preparar el lienzo (Canvas)
+                const canvas = document.getElementById("canvas");
+                canvas.width = size; 
+                canvas.height = size;
+                ctx = canvas.getContext("2d");
+                
+                // Preparar los cuadros de texto de las clases ("Squat", "Curl", etc)
+                labelContainer = document.getElementById("label-container");
+                labelContainer.innerHTML = "";
+                for (let i = 0; i < maxPredictions; i++) { 
+                    let div = document.createElement("div");
+                    div.className = "class-label";
+                    labelContainer.appendChild(div);
+                }
+                
+                feedbackPanel.innerHTML = "¡Listo! Empieza a moverte.";
+                feedbackPanel.style.backgroundColor = "#4ecca3"; // Verde
+            } catch (error) {
+                feedbackPanel.innerHTML = "ERROR: No se encontraron los archivos (model.json, weights.bin, etc). Revisa la consola.";
+                feedbackPanel.style.backgroundColor = "#e94560"; // Rojo
+                console.error(error);
+            }
+        }
+
+        function stop() {
+            running = false;
+            predicting = false;
+            if (rafId !== null) {
+                cancelAnimationFrame(rafId);
+                rafId = null;
+            }
+
+            try {
+                if (webcam && typeof webcam.stop === "function") {
+                    webcam.stop();
+                }
+                // Asegurar liberar tracks (por si quedó bloqueado)
+                if (webcam && webcam.webcam && webcam.webcam.srcObject) {
+                    const tracks = webcam.webcam.srcObject.getTracks ? webcam.webcam.srcObject.getTracks() : [];
+                    tracks.forEach(t => t.stop());
+                }
+            } catch (e) {
+                // ignorar
+            }
+
+            feedbackPanel.innerHTML = "Detenido. Puedes volver a iniciar.";
+            feedbackPanel.style.backgroundColor = "#555";
+        }
+
+        window.addEventListener("beforeunload", () => {
+            stop();
+        });
+
+        async function loop(timestamp) {
+            if (!running) return;
+            if (timestamp - lastFrameMs < FRAME_MS) {
+                rafId = window.requestAnimationFrame(loop);
+                return;
+            }
+            lastFrameMs = timestamp;
+
+            if (!predicting) {
+                predicting = true;
+                try {
+                    webcam.update();
+                    await predict(timestamp);
+                } catch (e) {
+                    console.error(e);
+                } finally {
+                    predicting = false;
+                }
+            }
+            rafId = window.requestAnimationFrame(loop);
+        }
+
+        // --- FUNCIÓN MATEMÁTICA: Para verificar si un movimiento está bien hecho ---
+        function calculateAngle(a, b, c) {
+            if (!a || !b || !c) return 0;
+            let radians = Math.atan2(c.position.y - b.position.y, c.position.x - b.position.x) - Math.atan2(a.position.y - b.position.y, a.position.x - b.position.x);
+            let angle = Math.abs(radians * 180.0 / Math.PI);
+            if (angle > 180.0) {
+                angle = 360 - angle;
+            }
+            return angle;
+        }
+
+        // Busca una articulación exacta dentro de los datos que devuelve la IA
+        function getPoint(keypoints, partName) {
+            return keypoints.find(k => k.part === partName && k.score > 0.3); // Mayor a 30% de confianza
+        }
+
+        function poseQuality(keypoints) {
+            const parts = [
+                "leftShoulder", "rightShoulder",
+                "leftElbow", "rightElbow",
+                "leftWrist", "rightWrist",
+                "leftHip", "rightHip",
+                "leftKnee", "rightKnee",
+                "leftAnkle", "rightAnkle",
+            ];
+            let sum = 0;
+            let count = 0;
+            for (const p of parts) {
+                const kp = keypoints.find(k => k.part === p);
+                if (kp) {
+                    sum += kp.score;
+                    count += 1;
+                }
+            }
+            return count ? (sum / count) : 0;
+        }
+
+        function normalizeProbs(arr) {
+            const sum = arr.reduce((a, b) => a + b, 0);
+            if (!sum) return arr;
+            return arr.map(v => v / sum);
+        }
+
+        // Ajustes suaves por biomecánica para evitar falsos positivos
+        function applyHeuristics(rawProbs, classNames, keypoints) {
+            const probs = rawProbs.slice();
+
+            const lHip = getPoint(keypoints, "leftHip");
+            const rHip = getPoint(keypoints, "rightHip");
+            const lKnee = getPoint(keypoints, "leftKnee");
+            const rKnee = getPoint(keypoints, "rightKnee");
+            const lAnkle = getPoint(keypoints, "leftAnkle");
+            const rAnkle = getPoint(keypoints, "rightAnkle");
+
+            // Señal de squat: rodilla flexionada
+            let kneeAngle = null;
+            const hip = lHip || rHip;
+            const knee = lKnee || rKnee;
+            const ankle = lAnkle || rAnkle;
+            if (hip && knee && ankle) {
+                kneeAngle = calculateAngle(hip, knee, ankle);
+            }
+
+            // Señal de plank: cuerpo casi recto hombro-cadera-tobillo
+            const shoulder = getPoint(keypoints, "leftShoulder") || getPoint(keypoints, "rightShoulder");
+            let plankAngle = null;
+            if (shoulder && hip && ankle) {
+                plankAngle = calculateAngle(shoulder, hip, ankle);
+            }
+
+            const isLikelySquat = kneeAngle !== null && kneeAngle < 125;
+            const isLikelyPlank = plankAngle !== null && plankAngle > 165;
+
+            for (let i = 0; i < classNames.length; i++) {
+                const name = (classNames[i] || "").toLowerCase();
+
+                if ((name.includes("squat") || name.includes("squad")) && isLikelySquat) {
+                    probs[i] *= 1.45;
+                }
+                if (name.includes("plank") && isLikelyPlank) {
+                    probs[i] *= 1.35;
+                }
+
+                // Si las piernas están claramente en modo squat/plank, penalizar un poco curl
+                if ((name.includes("curl") || name.includes("bicep")) && (isLikelySquat || isLikelyPlank)) {
+                    probs[i] *= 0.65;
+                }
+            }
+
+            return normalizeProbs(probs);
+        }
+
+        function top2FromProbs(probs) {
+            let bestI = 0;
+            let bestV = -1;
+            let secondI = 0;
+            let secondV = -1;
+
+            for (let i = 0; i < probs.length; i++) {
+                const v = probs[i];
+                if (v > bestV) {
+                    secondV = bestV;
+                    secondI = bestI;
+                    bestV = v;
+                    bestI = i;
+                } else if (v > secondV) {
+                    secondV = v;
+                    secondI = i;
+                }
+            }
+            return { bestI, bestV, secondI, secondV };
+        }
+
+        async function predict(nowMs) {
+            // Teachable Machine extrae las coordenadas de tu cuerpo (pose) y la probabilidad del ejercicio (prediction)
+            const { pose, posenetOutput } = await model.estimatePose(webcam.canvas);
+            const prediction = await model.predict(posenetOutput);
+
+            const classNames = prediction.map(p => p.className);
+            const rawProbs = prediction.map(p => p.probability);
+
+            let detectedExercise = "";
+            let highestProbability = 0;
+            let secondProbability = 0;
+
+            // Calidad de pose: si está baja, no confiamos en la clasificación
+            const kp = pose ? pose.keypoints : null;
+            const quality = kp ? poseQuality(kp) : 0;
+
+            // Ajustar + suavizar probabilidades
+            let probs = rawProbs;
+            if (kp && quality >= POSE_QUALITY_MIN) {
+                probs = applyHeuristics(rawProbs, classNames, kp);
+            }
+
+            if (smoothedProbs === null || smoothedProbs.length !== probs.length) {
+                smoothedProbs = probs.slice();
+            } else {
+                for (let i = 0; i < probs.length; i++) {
+                    smoothedProbs[i] = smoothedProbs[i] * (1 - SMOOTH_ALPHA) + probs[i] * SMOOTH_ALPHA;
+                }
+                smoothedProbs = normalizeProbs(smoothedProbs);
+            }
+
+            const { bestI, bestV, secondV } = top2FromProbs(smoothedProbs);
+            detectedExercise = classNames[bestI];
+            highestProbability = bestV;
+            secondProbability = secondV;
+
+            // Evitar re-render del DOM en cada frame (reduce lag)
+            if (nowMs - lastUiUpdateMs > 250) {
+                lastUiUpdateMs = nowMs;
+                for (let i = 0; i < maxPredictions; i++) {
+                    const className = classNames[i];
+                    const prob = smoothedProbs[i];
+                    labelContainer.childNodes[i].innerHTML = `${className}: ${(prob * 100).toFixed(0)}%`;
+                }
+            }
+
+            // --- LÓGICA DE CORRECCIÓN (BUENO VS MALO) ---
+            let isCorrect = true;
+            let message = "Analizando postura...";
+
+            // Decide si aceptamos el ejercicio (confianza + margen + pose visible)
+            const marginOk = (highestProbability - secondProbability) >= MIN_TOP1_MARGIN;
+            const confOk = highestProbability >= MIN_TOP1_CONF;
+            const poseOk = kp && quality >= POSE_QUALITY_MIN;
+
+            let chosenExercise = null;
+            if (poseOk && confOk && marginOk) {
+                // Estabilidad: requiere varios frames seguidos antes de "cambiar" de ejercicio
+                if (stableCandidate === detectedExercise) {
+                    stableCount += 1;
+                } else {
+                    stableCandidate = detectedExercise;
+                    stableCount = 1;
+                }
+                if (stableCount >= STABLE_FRAMES_REQUIRED) {
+                    lockedExercise = detectedExercise;
+                }
+                chosenExercise = lockedExercise || detectedExercise;
+            }
+
+            if (pose && chosenExercise) {
+                let exerciseLower = chosenExercise.toLowerCase();
+                const keypoints = pose.keypoints;
+
+                // 1. CURL DE BICEP
+                if (exerciseLower.includes("curl") || exerciseLower.includes("bicep")) {
+                    const shoulder = getPoint(keypoints, "leftShoulder") || getPoint(keypoints, "rightShoulder");
+                    const elbow = getPoint(keypoints, "leftElbow") || getPoint(keypoints, "rightElbow");
+                    
+                    if (shoulder && elbow) {
+                        // Si el codo se adelanta mucho respecto al cuerpo (trampa de balanceo)
+                        if (elbow.position.x < shoulder.position.x - 30) {
+                            message = "CURL BÍCEP: ERROR - Pega tu codo al torso, no te balancees.";
+                            isCorrect = false;
+                        } else {
+                            message = "CURL BÍCEP: Postura excelente.";
+                        }
+                    } else {
+                        message = "CURL BÍCEP: (Por favor, muestra tu brazo a la cámara)";
+                    }
+                
+                // 2. SQUAT (SENTADILLAS)
+                } else if (exerciseLower.includes("squat") || exerciseLower.includes("squad")) {
+                    const hip = getPoint(keypoints, "leftHip") || getPoint(keypoints, "rightHip");
+                    const knee = getPoint(keypoints, "leftKnee") || getPoint(keypoints, "rightKnee");
+                    const ankle = getPoint(keypoints, "leftAnkle") || getPoint(keypoints, "rightAnkle");
+                    
+                    if (hip && knee && ankle) {
+                        const angle = calculateAngle(hip, knee, ankle);
+                        // Verificar si está bajando a una profundidad peligrosa (ej. menor a 60 grados)
+                        if (angle < 60) {
+                            message = "SQUAT: ERROR - Estás bajando demasiado las caderas.";
+                            isCorrect = false;
+                        } else {
+                            message = "SQUAT: Buen rango de profundidad.";
+                        }
+                    } else {
+                        message = "SQUAT: (Alejate para que se vean tus piernas)";
+                    }
+
+                // 3. PLANK (PLANCHA)
+                } else if (exerciseLower.includes("plank")) {
+                    const shoulder = getPoint(keypoints, "leftShoulder") || getPoint(keypoints, "rightShoulder");
+                    const hip = getPoint(keypoints, "leftHip") || getPoint(keypoints, "rightHip");
+                    const ankle = getPoint(keypoints, "leftAnkle") || getPoint(keypoints, "rightAnkle");
+                    
+                    if (shoulder && hip && ankle) {
+                        const angle = calculateAngle(shoulder, hip, ankle);
+                        if (angle < 160) { // No está recto
+                            if (hip.position.y < shoulder.position.y) {
+                                message = "PLANK: ERROR - Baja la cadera, estás muy arriba.";
+                            } else {
+                                message = "PLANK: ERROR - Sube la cadera, te estás cayendo al piso.";
+                            }
+                            isCorrect = false;
+                        } else {
+                            message = "PLANK: Línea recta mantenida. ¡Perfecto!";
+                        }
+                    } else {
+                        message = "PLANK: (Por favor, muestra todo tu cuerpo de lado)";
+                    }
+
+                // 4. RUSSIAN TWIST
+                } else if (exerciseLower.includes("russian") || exerciseLower.includes("twist")) {
+                    const shoulder = getPoint(keypoints, "leftShoulder") || getPoint(keypoints, "rightShoulder");
+                    const hip = getPoint(keypoints, "leftHip") || getPoint(keypoints, "rightHip");
+                    
+                    if (shoulder && hip) {
+                        // Calcula si el torso está muy vertical
+                        let diffX = Math.abs(shoulder.position.x - hip.position.x);
+                        if (diffX < 25) { 
+                            message = "RUSSIAN TWIST: ERROR - Inclina tu espalda más hacia atrás (~45°).";
+                            isCorrect = false;
+                        } else {
+                            message = "RUSSIAN TWIST: Inclinación correcta. Sigue.";
+                        }
+                    }
+                } else {
+                    message = `Detectado: ${chosenExercise}`;
+                }
+            } else {
+                if (!pose || !kp) {
+                    message = "No veo tu cuerpo. Ponte frente a la cámara.";
+                } else if (quality < POSE_QUALITY_MIN) {
+                    message = "Poca visibilidad. Aléjate / que se vea todo el cuerpo.";
+                } else {
+                    message = "Inconcluso: mantén la postura 1-2s.";
+                }
+                isCorrect = true; // Neutral
+            }
+
+            // Cambiar los colores de la UI
+            feedbackPanel.innerHTML = message;
+            if (debugEl) {
+                const locked = lockedExercise ? lockedExercise : "(none)";
+                debugEl.textContent = `Locked: ${locked} | top1=${(highestProbability * 100).toFixed(0)}% | margin=${((highestProbability - secondProbability) * 100).toFixed(0)}%`;
+            }
+            if (poseOk && confOk && marginOk) {
+                feedbackPanel.style.backgroundColor = isCorrect ? "#4ecca3" : "#e94560"; // Verde o Rojo
+            } else {
+                feedbackPanel.style.backgroundColor = "#555"; // Gris
+            }
+
+            // Al final, dibujar la imagen y los esqueletos
+            drawPose(pose, isCorrect);
+
+            // Liberar memoria de TFJS (evita que se congele tras unos segundos/minutos)
+            try {
+                if (posenetOutput && typeof posenetOutput.dispose === "function") {
+                    posenetOutput.dispose();
+                } else {
+                    tf.dispose(posenetOutput);
+                }
+            } catch (e) {
+                // ignorar
+            }
+        }
+
+        // Dibuja el marco de la cámara y el esqueleto (Verde o Rojo)
+        function drawPose(pose, isCorrect) {
+            if (webcam.canvas) {
+                ctx.drawImage(webcam.canvas, 0, 0);
+                if (pose) {
+                    const minPartConfidence = 0.5;
+                    const strokeColor = isCorrect ? "#4ecca3" : "#e94560"; // Verde / Rojo
+
+                    // Usar las funciones oficiales de TM (más estables)
+                    // Coloreamos el canvas antes de dibujar.
+                    ctx.fillStyle = strokeColor;
+                    ctx.strokeStyle = strokeColor;
+                    ctx.lineWidth = 4;
+
+                    try {
+                        tmPose.drawKeypoints(pose.keypoints, minPartConfidence, ctx);
+                        tmPose.drawSkeleton(pose.keypoints, minPartConfidence, ctx);
+                    } catch (e) {
+                        // si algo falla, no frenamos el loop
+                    }
+                }
+            }
+        }
+    </script>
+</body>
+</html>
