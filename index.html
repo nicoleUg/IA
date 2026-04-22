@@ -112,16 +112,28 @@
         let rafId = null;
         let lastUiUpdateMs = 0;
 
-        // Limitar FPS para no saturar CPU/GPU (PoseNet es pesado)
-        const TARGET_FPS = 8;
-        const FRAME_MS = Math.floor(1000 / TARGET_FPS);
-        let lastFrameMs = 0;
+        // Predicción (IA) a FPS bajos; video fluido a 60fps (requestAnimationFrame)
+        const PREDICT_FPS = 6;
+        const PREDICT_MS = Math.floor(1000 / PREDICT_FPS);
+        let lastPredictMs = 0;
+
+        // Último estado de pose para dibujar overlay sin frenar el video
+        let lastPose = null;
+        let lastIsCorrect = true;
 
         // Estabilización de predicción (evita que siempre marque "curl")
         const SMOOTH_ALPHA = 0.35; // 0..1 (más alto = reacciona más rápido)
-        const MIN_TOP1_CONF = 0.72;
-        const MIN_TOP1_MARGIN = 0.10; // top1 - top2
-        const POSE_QUALITY_MIN = 0.35; // promedio de score de puntos clave
+        const MIN_TOP1_CONF = 0.68;
+        const MIN_TOP1_MARGIN = 0.07; // top1 - top2
+        const POSE_QUALITY_MIN = 0.28; // promedio de score de puntos clave
+        const POSE_QUALITY_UPPER_MIN = 0.32; // si se ve bien tronco/brazos, dejamos clasificar
+
+        // Umbrales especiales para plancha (suele confundirse si no se ven tobillos)
+        const MIN_TOP1_CONF_PLANK = 0.58;
+        const MIN_TOP1_MARGIN_PLANK = 0.03;
+
+        const KP_MIN_DEFAULT = 0.22;
+        const KP_MIN_LEG = 0.15;
 
         let smoothedProbs = null; // Array<number>
         let lockedExercise = null; // string
@@ -157,10 +169,11 @@
                 maxPredictions = model.getTotalClasses();
 
                 // 2. Configurar la cámara web
-                // Mantener resolución moderada evita trabas (500px es pesado)
-                const size = 320;
+                // 4:3 evita recorte; resolución moderada para que no vaya lenta
+                const camW = 384;
+                const camH = 288;
                 const flip = true; // Efecto espejo
-                webcam = new tmPose.Webcam(size, size, flip);
+                webcam = new tmPose.Webcam(camW, camH, flip);
                 await webcam.setup(); 
                 await webcam.play();
                 running = true;
@@ -168,8 +181,8 @@
 
                 // 3. Preparar el lienzo (Canvas)
                 const canvas = document.getElementById("canvas");
-                canvas.width = size; 
-                canvas.height = size;
+                canvas.width = camW;
+                canvas.height = camH;
                 ctx = canvas.getContext("2d");
                 
                 // Preparar los cuadros de texto de las clases ("Squat", "Curl", etc)
@@ -193,6 +206,8 @@
         function stop() {
             running = false;
             predicting = false;
+            lastPose = null;
+            lastIsCorrect = true;
             if (rafId !== null) {
                 cancelAnimationFrame(rafId);
                 rafId = null;
@@ -221,22 +236,28 @@
 
         async function loop(timestamp) {
             if (!running) return;
-            if (timestamp - lastFrameMs < FRAME_MS) {
-                rafId = window.requestAnimationFrame(loop);
-                return;
+            try {
+                webcam.update();
+            } catch (e) {
+                console.error(e);
             }
-            lastFrameMs = timestamp;
 
-            if (!predicting) {
-                predicting = true;
-                try {
-                    webcam.update();
-                    await predict(timestamp);
-                } catch (e) {
-                    console.error(e);
-                } finally {
-                    predicting = false;
+            // Dibujar video SIEMPRE para que se vea fluido
+            if (webcam.canvas && ctx) {
+                ctx.drawImage(webcam.canvas, 0, 0);
+                // Dibujar el overlay con la última pose conocida
+                if (lastPose) {
+                    drawOverlay(lastPose, lastIsCorrect);
                 }
+            }
+
+            // Correr IA a baja frecuencia, sin bloquear el render
+            if (!predicting && (timestamp - lastPredictMs >= PREDICT_MS)) {
+                predicting = true;
+                lastPredictMs = timestamp;
+                predict(timestamp)
+                    .catch(e => console.error(e))
+                    .finally(() => { predicting = false; });
             }
             rafId = window.requestAnimationFrame(loop);
         }
@@ -252,9 +273,16 @@
             return angle;
         }
 
+        function distance(a, b) {
+            if (!a || !b) return 0;
+            const dx = a.position.x - b.position.x;
+            const dy = a.position.y - b.position.y;
+            return Math.hypot(dx, dy);
+        }
+
         // Busca una articulación exacta dentro de los datos que devuelve la IA
-        function getPoint(keypoints, partName) {
-            return keypoints.find(k => k.part === partName && k.score > 0.3); // Mayor a 30% de confianza
+        function getPoint(keypoints, partName, minScore = KP_MIN_DEFAULT) {
+            return keypoints.find(k => k.part === partName && k.score >= minScore);
         }
 
         function poseQuality(keypoints) {
@@ -278,6 +306,67 @@
             return count ? (sum / count) : 0;
         }
 
+        function poseQualityUpper(keypoints) {
+            const parts = [
+                "leftShoulder", "rightShoulder",
+                "leftElbow", "rightElbow",
+                "leftWrist", "rightWrist",
+                "leftHip", "rightHip",
+            ];
+            let sum = 0;
+            let count = 0;
+            for (const p of parts) {
+                const kp = keypoints.find(k => k.part === p);
+                if (kp) {
+                    sum += kp.score;
+                    count += 1;
+                }
+            }
+            return count ? (sum / count) : 0;
+        }
+
+        function poseQualityLower(keypoints) {
+            const parts = [
+                "leftHip", "rightHip",
+                "leftKnee", "rightKnee",
+                "leftAnkle", "rightAnkle",
+            ];
+            let sum = 0;
+            let count = 0;
+            for (const p of parts) {
+                const kp = keypoints.find(k => k.part === p);
+                if (kp) {
+                    sum += kp.score;
+                    count += 1;
+                }
+            }
+            return count ? (sum / count) : 0;
+        }
+
+        function plankHintFromKeypoints(keypoints) {
+            const shoulder = getPoint(keypoints, "leftShoulder", KP_MIN_DEFAULT) || getPoint(keypoints, "rightShoulder", KP_MIN_DEFAULT);
+            const hip = getPoint(keypoints, "leftHip", KP_MIN_DEFAULT) || getPoint(keypoints, "rightHip", KP_MIN_DEFAULT);
+            const ankle = getPoint(keypoints, "leftAnkle", KP_MIN_LEG) || getPoint(keypoints, "rightAnkle", KP_MIN_LEG);
+            const knee = getPoint(keypoints, "leftKnee", KP_MIN_DEFAULT) || getPoint(keypoints, "rightKnee", KP_MIN_DEFAULT);
+            const legPoint = ankle || knee;
+
+            if (!shoulder || !hip || !legPoint) {
+                return { likely: false, strength: 0, angle: 0 };
+            }
+
+            const angle = calculateAngle(shoulder, hip, legPoint);
+            const torso = distance(shoulder, hip) || 1;
+            const legDy = Math.abs(legPoint.position.y - hip.position.y);
+
+            // Si está parado, el tobillo/rodilla queda muy por debajo de la cadera.
+            // En plancha (vista lateral), la pierna suele estar a altura parecida a la cadera.
+            const heightOk = (legDy / torso) < 1.25;
+            const straightOk = angle > 168;
+
+            const strength = (straightOk ? 0.6 : 0) + (heightOk ? 0.4 : 0);
+            return { likely: straightOk && heightOk, strength, angle };
+        }
+
         function normalizeProbs(arr) {
             const sum = arr.reduce((a, b) => a + b, 0);
             if (!sum) return arr;
@@ -288,12 +377,12 @@
         function applyHeuristics(rawProbs, classNames, keypoints) {
             const probs = rawProbs.slice();
 
-            const lHip = getPoint(keypoints, "leftHip");
-            const rHip = getPoint(keypoints, "rightHip");
-            const lKnee = getPoint(keypoints, "leftKnee");
-            const rKnee = getPoint(keypoints, "rightKnee");
-            const lAnkle = getPoint(keypoints, "leftAnkle");
-            const rAnkle = getPoint(keypoints, "rightAnkle");
+            const lHip = getPoint(keypoints, "leftHip", KP_MIN_DEFAULT);
+            const rHip = getPoint(keypoints, "rightHip", KP_MIN_DEFAULT);
+            const lKnee = getPoint(keypoints, "leftKnee", KP_MIN_DEFAULT);
+            const rKnee = getPoint(keypoints, "rightKnee", KP_MIN_DEFAULT);
+            const lAnkle = getPoint(keypoints, "leftAnkle", KP_MIN_LEG);
+            const rAnkle = getPoint(keypoints, "rightAnkle", KP_MIN_LEG);
 
             // Señal de squat: rodilla flexionada
             let kneeAngle = null;
@@ -305,14 +394,16 @@
             }
 
             // Señal de plank: cuerpo casi recto hombro-cadera-tobillo
-            const shoulder = getPoint(keypoints, "leftShoulder") || getPoint(keypoints, "rightShoulder");
+            const shoulder = getPoint(keypoints, "leftShoulder", KP_MIN_DEFAULT) || getPoint(keypoints, "rightShoulder", KP_MIN_DEFAULT);
             let plankAngle = null;
-            if (shoulder && hip && ankle) {
-                plankAngle = calculateAngle(shoulder, hip, ankle);
+            const legPointForPlank = ankle || knee;
+            if (shoulder && hip && legPointForPlank) {
+                plankAngle = calculateAngle(shoulder, hip, legPointForPlank);
             }
 
             const isLikelySquat = kneeAngle !== null && kneeAngle < 125;
-            const isLikelyPlank = plankAngle !== null && plankAngle > 165;
+            const hint = plankHintFromKeypoints(keypoints);
+            const isLikelyPlank = hint.likely || (plankAngle !== null && plankAngle > 167);
 
             for (let i = 0; i < classNames.length; i++) {
                 const name = (classNames[i] || "").toLowerCase();
@@ -321,7 +412,8 @@
                     probs[i] *= 1.45;
                 }
                 if (name.includes("plank") && isLikelyPlank) {
-                    probs[i] *= 1.35;
+                    // plancha suele necesitar más ayuda para ganar contra otras clases
+                    probs[i] *= hint.likely ? 2.10 : 1.55;
                 }
 
                 // Si las piernas están claramente en modo squat/plank, penalizar un poco curl
@@ -369,10 +461,13 @@
             // Calidad de pose: si está baja, no confiamos en la clasificación
             const kp = pose ? pose.keypoints : null;
             const quality = kp ? poseQuality(kp) : 0;
+            const upperQ = kp ? poseQualityUpper(kp) : 0;
+            const lowerQ = kp ? poseQualityLower(kp) : 0;
+            const plankHint = kp ? plankHintFromKeypoints(kp) : { likely: false, strength: 0, angle: 0 };
 
             // Ajustar + suavizar probabilidades
             let probs = rawProbs;
-            if (kp && quality >= POSE_QUALITY_MIN) {
+            if (kp && (quality >= POSE_QUALITY_MIN || upperQ >= POSE_QUALITY_UPPER_MIN)) {
                 probs = applyHeuristics(rawProbs, classNames, kp);
             }
 
@@ -390,6 +485,20 @@
             highestProbability = bestV;
             secondProbability = secondV;
 
+            // Override suave: si la postura parece plancha y el modelo está cerca, priorizar plancha
+            if (kp && plankHint.likely) {
+                const plankIdx = classNames.findIndex(n => (n || "").toLowerCase().includes("plank"));
+                if (plankIdx >= 0) {
+                    const plankProb = smoothedProbs[plankIdx];
+                    // Si plank está bastante alto y cerca del top1, lo tomamos como ejercicio actual
+                    if (plankProb >= 0.40 && (plankProb > highestProbability - 0.06)) {
+                        secondProbability = Math.max(secondProbability, highestProbability);
+                        detectedExercise = classNames[plankIdx];
+                        highestProbability = plankProb;
+                    }
+                }
+            }
+
             // Evitar re-render del DOM en cada frame (reduce lag)
             if (nowMs - lastUiUpdateMs > 250) {
                 lastUiUpdateMs = nowMs;
@@ -405,9 +514,13 @@
             let message = "Analizando postura...";
 
             // Decide si aceptamos el ejercicio (confianza + margen + pose visible)
-            const marginOk = (highestProbability - secondProbability) >= MIN_TOP1_MARGIN;
-            const confOk = highestProbability >= MIN_TOP1_CONF;
-            const poseOk = kp && quality >= POSE_QUALITY_MIN;
+            const isPlankCandidate = (detectedExercise || "").toLowerCase().includes("plank") || (plankHint && plankHint.likely);
+            const confThreshold = isPlankCandidate ? MIN_TOP1_CONF_PLANK : MIN_TOP1_CONF;
+            const marginThreshold = isPlankCandidate ? MIN_TOP1_MARGIN_PLANK : MIN_TOP1_MARGIN;
+
+            const marginOk = (highestProbability - secondProbability) >= marginThreshold;
+            const confOk = highestProbability >= confThreshold;
+            const poseOk = kp && (quality >= POSE_QUALITY_MIN || upperQ >= POSE_QUALITY_UPPER_MIN);
 
             let chosenExercise = null;
             if (poseOk && confOk && marginOk) {
@@ -447,9 +560,9 @@
                 
                 // 2. SQUAT (SENTADILLAS)
                 } else if (exerciseLower.includes("squat") || exerciseLower.includes("squad")) {
-                    const hip = getPoint(keypoints, "leftHip") || getPoint(keypoints, "rightHip");
-                    const knee = getPoint(keypoints, "leftKnee") || getPoint(keypoints, "rightKnee");
-                    const ankle = getPoint(keypoints, "leftAnkle") || getPoint(keypoints, "rightAnkle");
+                    const hip = getPoint(keypoints, "leftHip", KP_MIN_DEFAULT) || getPoint(keypoints, "rightHip", KP_MIN_DEFAULT);
+                    const knee = getPoint(keypoints, "leftKnee", KP_MIN_DEFAULT) || getPoint(keypoints, "rightKnee", KP_MIN_DEFAULT);
+                    const ankle = getPoint(keypoints, "leftAnkle", KP_MIN_LEG) || getPoint(keypoints, "rightAnkle", KP_MIN_LEG);
                     
                     if (hip && knee && ankle) {
                         const angle = calculateAngle(hip, knee, ankle);
@@ -466,12 +579,14 @@
 
                 // 3. PLANK (PLANCHA)
                 } else if (exerciseLower.includes("plank")) {
-                    const shoulder = getPoint(keypoints, "leftShoulder") || getPoint(keypoints, "rightShoulder");
-                    const hip = getPoint(keypoints, "leftHip") || getPoint(keypoints, "rightHip");
-                    const ankle = getPoint(keypoints, "leftAnkle") || getPoint(keypoints, "rightAnkle");
+                    const shoulder = getPoint(keypoints, "leftShoulder", KP_MIN_DEFAULT) || getPoint(keypoints, "rightShoulder", KP_MIN_DEFAULT);
+                    const hip = getPoint(keypoints, "leftHip", KP_MIN_DEFAULT) || getPoint(keypoints, "rightHip", KP_MIN_DEFAULT);
+                    const ankle = getPoint(keypoints, "leftAnkle", KP_MIN_LEG) || getPoint(keypoints, "rightAnkle", KP_MIN_LEG);
+                    const knee = getPoint(keypoints, "leftKnee", KP_MIN_DEFAULT) || getPoint(keypoints, "rightKnee", KP_MIN_DEFAULT);
+                    const legPoint = ankle || knee;
                     
-                    if (shoulder && hip && ankle) {
-                        const angle = calculateAngle(shoulder, hip, ankle);
+                    if (shoulder && hip && legPoint) {
+                        const angle = calculateAngle(shoulder, hip, legPoint);
                         if (angle < 160) { // No está recto
                             if (hip.position.y < shoulder.position.y) {
                                 message = "PLANK: ERROR - Baja la cadera, estás muy arriba.";
@@ -483,13 +598,13 @@
                             message = "PLANK: Línea recta mantenida. ¡Perfecto!";
                         }
                     } else {
-                        message = "PLANK: (Por favor, muestra todo tu cuerpo de lado)";
+                        message = "PLANK: (Ponte de lado y que se vea el cuerpo completo, especialmente piernas)";
                     }
 
                 // 4. RUSSIAN TWIST
                 } else if (exerciseLower.includes("russian") || exerciseLower.includes("twist")) {
-                    const shoulder = getPoint(keypoints, "leftShoulder") || getPoint(keypoints, "rightShoulder");
-                    const hip = getPoint(keypoints, "leftHip") || getPoint(keypoints, "rightHip");
+                    const shoulder = getPoint(keypoints, "leftShoulder", KP_MIN_DEFAULT) || getPoint(keypoints, "rightShoulder", KP_MIN_DEFAULT);
+                    const hip = getPoint(keypoints, "leftHip", KP_MIN_DEFAULT) || getPoint(keypoints, "rightHip", KP_MIN_DEFAULT);
                     
                     if (shoulder && hip) {
                         // Calcula si el torso está muy vertical
@@ -507,8 +622,8 @@
             } else {
                 if (!pose || !kp) {
                     message = "No veo tu cuerpo. Ponte frente a la cámara.";
-                } else if (quality < POSE_QUALITY_MIN) {
-                    message = "Poca visibilidad. Aléjate / que se vea todo el cuerpo.";
+                } else if (quality < POSE_QUALITY_MIN && upperQ < POSE_QUALITY_UPPER_MIN) {
+                    message = "Poca visibilidad. Mejor luz y que se vea el cuerpo.";
                 } else {
                     message = "Inconcluso: mantén la postura 1-2s.";
                 }
@@ -519,7 +634,7 @@
             feedbackPanel.innerHTML = message;
             if (debugEl) {
                 const locked = lockedExercise ? lockedExercise : "(none)";
-                debugEl.textContent = `Locked: ${locked} | top1=${(highestProbability * 100).toFixed(0)}% | margin=${((highestProbability - secondProbability) * 100).toFixed(0)}%`;
+                debugEl.textContent = `Locked: ${locked} | top1=${(highestProbability * 100).toFixed(0)}% | margin=${((highestProbability - secondProbability) * 100).toFixed(0)}% | upper=${(upperQ*100).toFixed(0)}% | lower=${(lowerQ*100).toFixed(0)}% | plankHint=${plankHint.likely ? "yes" : "no"}(${(plankHint.strength*100).toFixed(0)}%)`;
             }
             if (poseOk && confOk && marginOk) {
                 feedbackPanel.style.backgroundColor = isCorrect ? "#4ecca3" : "#e94560"; // Verde o Rojo
@@ -527,8 +642,9 @@
                 feedbackPanel.style.backgroundColor = "#555"; // Gris
             }
 
-            // Al final, dibujar la imagen y los esqueletos
-            drawPose(pose, isCorrect);
+            // Guardar pose para dibujar overlay en el loop (sin frenar la cámara)
+            lastPose = pose || null;
+            lastIsCorrect = !!isCorrect;
 
             // Liberar memoria de TFJS (evita que se congele tras unos segundos/minutos)
             try {
@@ -542,27 +658,21 @@
             }
         }
 
-        // Dibuja el marco de la cámara y el esqueleto (Verde o Rojo)
-        function drawPose(pose, isCorrect) {
-            if (webcam.canvas) {
-                ctx.drawImage(webcam.canvas, 0, 0);
-                if (pose) {
-                    const minPartConfidence = 0.5;
-                    const strokeColor = isCorrect ? "#4ecca3" : "#e94560"; // Verde / Rojo
+        // Dibuja el esqueleto encima del video (Verde o Rojo)
+        function drawOverlay(pose, isCorrect) {
+            if (!pose) return;
+            const minPartConfidence = 0.20;
+            const strokeColor = isCorrect ? "#4ecca3" : "#e94560"; // Verde / Rojo
 
-                    // Usar las funciones oficiales de TM (más estables)
-                    // Coloreamos el canvas antes de dibujar.
-                    ctx.fillStyle = strokeColor;
-                    ctx.strokeStyle = strokeColor;
-                    ctx.lineWidth = 4;
+            ctx.fillStyle = strokeColor;
+            ctx.strokeStyle = strokeColor;
+            ctx.lineWidth = 4;
 
-                    try {
-                        tmPose.drawKeypoints(pose.keypoints, minPartConfidence, ctx);
-                        tmPose.drawSkeleton(pose.keypoints, minPartConfidence, ctx);
-                    } catch (e) {
-                        // si algo falla, no frenamos el loop
-                    }
-                }
+            try {
+                tmPose.drawKeypoints(pose.keypoints, minPartConfidence, ctx);
+                tmPose.drawSkeleton(pose.keypoints, minPartConfidence, ctx);
+            } catch (e) {
+                // si algo falla, no frenamos el loop
             }
         }
     </script>
