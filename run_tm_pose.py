@@ -12,7 +12,7 @@ PAGE = "index.html"
 
 
 class QuietHandler(http.server.SimpleHTTPRequestHandler):
-    def log_message(self, format, *args):  # noqa: A002
+    def log_message(self, format, *args):  
         return
 
 
@@ -25,7 +25,7 @@ def start_server(host: str, port: int) -> socketserver.TCPServer:
 
 
 def open_in_webview(url: str) -> None:
-    import webview  # lazy import so browser mode works even if webview fails
+    import webview  
 
     webview.create_window(
         "Teachable Machine Pose (Local)",
@@ -67,11 +67,9 @@ def main() -> None:
         if args.browser:
             webbrowser.open(url)
             print("Se abrió en el navegador. Para cerrar: Ctrl+C en esta terminal.")
-            # Keep the server alive until user stops it.
             while True:
                 time.sleep(1)
 
-        # Default: try WebView app window
         try:
             open_in_webview(url)
         except Exception as exc:
