@@ -4,633 +4,948 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Entrenador IA - Teachable Machine Pose</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
+        :root {
+            --bg: #09101a;
+            --panel-bg: #111a28;
+            --panel-border: #1f2d40;
+            --cyan: #00d2ff;
+            --green: #20e294;
+            --red: #ff3b5c;
+            --idle: #38bdf8;
+            --text-main: #e2e8f0;
+            --text-muted: #94a3b8;
+        }
+
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background-color: #1a1a2e;
-            color: #fff;
-            text-align: center;
+            font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--bg);
+            color: var(--text-main);
             margin: 0;
             padding: 20px;
+            text-align: center;
         }
+
         h1 {
-            color: #4ecca3;
+            margin-top: 10px;
+            margin-bottom: 8px;
+            color: #7dd3fc;
         }
-        #main-container {
+
+        .subtitle {
+            color: var(--text-muted);
+            margin-bottom: 18px;
+        }
+
+        .btn-group {
             display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 20px;
-            margin-top: 20px;
+            justify-content: center;
+            gap: 10px;
+            margin-bottom: 16px;
         }
+
         button {
-            padding: 12px 24px;
-            font-size: 18px;
-            font-weight: bold;
-            background-color: #e94560;
-            color: white;
+            padding: 10px 16px;
+            font-size: 15px;
+            font-weight: 600;
             border: none;
             border-radius: 8px;
             cursor: pointer;
-            transition: 0.3s;
+            color: #fff;
+            background: #0ea5e9;
         }
-        button:hover {
-            background-color: #d13050;
+
+        button.secondary {
+            background: #475569;
         }
+
+        #main-layout {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 18px;
+            justify-content: center;
+            align-items: flex-start;
+            max-width: 1100px;
+            margin: 0 auto;
+        }
+
+        .column-left {
+            width: min(700px, 95vw);
+        }
+
+        .column-right {
+            width: min(340px, 95vw);
+        }
+
         #canvas-wrapper {
             position: relative;
-            display: inline-block;
-            border: 5px solid #0f3460;
+            background: var(--panel-bg);
+            border: 1px solid var(--panel-border);
             border-radius: 12px;
+            aspect-ratio: 4 / 3;
             overflow: hidden;
-            box-shadow: 0 8px 16px rgba(0,0,0,0.5);
         }
-        #feedback-panel {
-            width: 600px;
-            padding: 20px;
-            font-size: 22px;
-            font-weight: bold;
-            border-radius: 10px;
-            background-color: #333;
-            transition: background-color 0.3s;
-        }
-        #label-container {
+
+        #placeholder-box {
+            position: absolute;
+            inset: 0;
             display: flex;
             flex-direction: column;
-            align-items: flex-start;
-            background: #0f3460;
-            padding: 15px;
-            border-radius: 8px;
-            width: 300px;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-muted);
+            gap: 8px;
+            z-index: 2;
         }
-        .class-label {
-            margin: 5px 0;
-            font-size: 16px;
+
+        canvas {
+            width: 100% !important;
+            height: 100% !important;
+            object-fit: cover;
+        }
+
+        #status-panel {
+            margin-top: 12px;
+            background: var(--panel-bg);
+            border: 1px solid var(--panel-border);
+            border-radius: 10px;
+            padding: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            font-weight: 700;
+        }
+
+        #status-panel.good { border-color: var(--green); color: var(--green); }
+        #status-panel.bad { border-color: var(--red); color: var(--red); }
+        #status-panel.warning { border-color: #f59e0b; color: #f59e0b; }
+        #status-panel.idle { border-color: var(--idle); color: var(--idle); }
+
+        .panel {
+            background: var(--panel-bg);
+            border: 1px solid var(--panel-border);
+            border-radius: 12px;
+            padding: 14px;
+            text-align: left;
+        }
+
+        .metric-row { margin-bottom: 12px; }
+        .metric-header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 5px;
+            font-size: 14px;
+        }
+
+        .metric-bar-bg {
+            height: 8px;
+            background: #1e293b;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .metric-bar-fill {
+            height: 100%;
+            width: 0%;
+            background: linear-gradient(90deg, #00d2ff, #20e294);
+        }
+
+        #debug {
+            margin-top: 12px;
+            color: #64748b;
+            font-family: Consolas, monospace;
+            font-size: 12px;
+            text-align: center;
         }
     </style>
 </head>
 <body>
-    <h1>Verificador Gym IA (Teachable Machine Pose)</h1>
-    <p>Detecta automáticamente qué ejercicio haces y verifica tu postura en tiempo real.</p>
-    
-    <div id="main-container">
-        <div>
-            <button type="button" onclick="init()">Activar Cámara e IA</button>
-            <button type="button" onclick="stop()" style="background-color:#555;margin-left:10px;">Detener</button>
-        </div>
-        
-        <div id="canvas-wrapper">
-            <canvas id="canvas"></canvas>
+    <h1>VERIFICADOR GYM IA</h1>
+    <p class="subtitle">Detecta automáticamente qué ejercicio haces y verifica tu postura en tiempo real.</p>
+
+    <div class="btn-group">
+        <button type="button" onclick="init()"><i class="fa-solid fa-camera"></i> Activar Cámara e IA</button>
+        <button type="button" class="secondary" onclick="stop()"><i class="fa-solid fa-video-slash"></i> Detener</button>
+    </div>
+
+    <div id="main-layout">
+        <div class="column-left">
+            <div id="canvas-wrapper">
+                <div id="placeholder-box">
+                    <i class="fa-solid fa-camera-retro"></i>
+                    <span>Presiona "Activar Cámara e IA" para comenzar</span>
+                </div>
+                <canvas id="canvas"></canvas>
+            </div>
+            <div id="status-panel">
+                <i class="fa-solid fa-wave-square"></i>
+                <span class="status-text" id="status-text">Esperando a iniciar...</span>
+            </div>
         </div>
 
-        <div id="feedback-panel">Esperando a iniciar...</div>
-        
-        <div id="label-container"></div>
-
-        <div id="debug" style="font-size:14px;opacity:0.85;max-width:700px;">
-            
+        <div class="column-right">
+            <div class="panel">
+                <h3 style="margin-top:0">Métricas</h3>
+                <div id="label-container"></div>
+            </div>
         </div>
     </div>
 
+    <div id="debug"></div>
+
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@1.3.1/dist/tf.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/pose@0.8/dist/teachablemachine-pose.min.js"></script>
-    
-    <script type="text/javascript">
-        const URL = "./"; 
-        
-        let model, webcam, ctx, labelContainer, maxPredictions;
-        let feedbackPanel = document.getElementById("feedback-panel");
-        let debugEl = document.getElementById("debug");
 
-        let running = false;
-        let predicting = false;
-        let rafId = null;
-        let lastUiUpdateMs = 0;
+<script type="text/javascript">
+    const URL = "./";
 
-        const PREDICT_FPS = 6;
-        const PREDICT_MS = Math.floor(1000 / PREDICT_FPS);
-        let lastPredictMs = 0;
+    let model, webcam, ctx, labelContainer, maxPredictions;
+    let statusPanel = document.getElementById("status-panel");
+    let statusText = document.getElementById("status-text");
+    let debugEl = document.getElementById("debug");
 
-        let lastPose = null;
-        let lastIsCorrect = true;
+    let running = false;
+    let predicting = false;
+    let rafId = null;
+    let lastUiUpdateMs = 0;
 
-        const SMOOTH_ALPHA = 0.35; 
-        const MIN_TOP1_CONF = 0.68;
-        const MIN_TOP1_MARGIN = 0.07; 
-        const POSE_QUALITY_MIN = 0.28; 
-        const POSE_QUALITY_UPPER_MIN = 0.32; 
+    const PREDICT_FPS = 6;
+    const PREDICT_MS = Math.floor(1000 / PREDICT_FPS);
+    let lastPredictMs = 0;
 
-        const MIN_TOP1_CONF_PLANK = 0.58;
-        const MIN_TOP1_MARGIN_PLANK = 0.03;
+    let lastPose = null;
+    let lastIsCorrect = true;
 
-        const KP_MIN_DEFAULT = 0.22;
-        const KP_MIN_LEG = 0.15;
+    const SMOOTH_ALPHA = 0.35;
+    const MIN_TOP1_CONF = 0.52;
+    const MIN_TOP1_MARGIN = 0.05;
+    const POSE_QUALITY_MIN = 0.28;
+    const POSE_QUALITY_UPPER_MIN = 0.32;
 
-        let smoothedProbs = null; 
-        let lockedExercise = null; 
-        let stableCandidate = null;
-        let stableCount = 0;
-        const STABLE_FRAMES_REQUIRED = 3;
+    const MIN_TOP1_CONF_PLANK = 0.52;
+    const MIN_TOP1_MARGIN_PLANK = 0.02;
 
-        async function init() {
-            if (running) return;
-            const modelURL = URL + "model.json";
-            const metadataURL = URL + "metadata.json";
+    const IDLE_CONF_MAX = 0.35;
+    const IDLE_MOTION_THRESHOLD = 0.10;
+    const IDLE_FRAMES_REQUIRED = 8;
 
-            feedbackPanel.innerHTML = "Cargando cerebro de IA...";
-            feedbackPanel.style.backgroundColor = "#e4a11b"; // Naranja
+    const KP_MIN_DEFAULT = 0.22;
+    const KP_MIN_LEG = 0.15;
 
+    const STABLE_FRAMES_REQUIRED = 2;
+    const LOCK_RESET_AFTER_MISSES = 8;
+
+    let smoothedProbs = null;
+    let lockedExercise = null;
+    let stableCandidate = null;
+    let stableCount = 0;
+    let missCount = 0;
+    let idleCount = 0;
+
+    async function init() {
+        if (running) return;
+        const modelURL = URL + "model.json";
+        const metadataURL = URL + "metadata.json";
+
+        statusText.innerText = "Cargando cerebro de IA...";
+        statusPanel.className = "warning";
+        statusPanel.querySelector("i").className = "fa-solid fa-spinner fa-spin";
+
+        try {
+            const params = new URLSearchParams(window.location.search);
+            const requestedBackend = (params.get("backend") || "webgl").toLowerCase();
             try {
-                const params = new URLSearchParams(window.location.search);
-                const requestedBackend = (params.get("backend") || "webgl").toLowerCase();
-                try {
-                    if (requestedBackend === "cpu") {
-                        await tf.setBackend("cpu");
-                    } else {
-                        await tf.setBackend("webgl");
-                    }
-                    await tf.ready();
-                } catch (e) {
+                if (requestedBackend === "cpu") {
+                    await tf.setBackend("cpu");
+                } else {
+                    await tf.setBackend("webgl");
                 }
-
-                model = await tmPose.load(modelURL, metadataURL);
-                maxPredictions = model.getTotalClasses();
-
-              
-                const camW = 384;
-                const camH = 288;
-                const flip = true; 
-                webcam = new tmPose.Webcam(camW, camH, flip);
-                await webcam.setup(); 
-                await webcam.play();
-                running = true;
-                rafId = window.requestAnimationFrame(loop);
-
-                const canvas = document.getElementById("canvas");
-                canvas.width = camW;
-                canvas.height = camH;
-                ctx = canvas.getContext("2d");
-                
-                labelContainer = document.getElementById("label-container");
-                labelContainer.innerHTML = "";
-                for (let i = 0; i < maxPredictions; i++) { 
-                    let div = document.createElement("div");
-                    div.className = "class-label";
-                    labelContainer.appendChild(div);
-                }
-                
-                feedbackPanel.innerHTML = "¡Listo! Empieza a moverte.";
-                feedbackPanel.style.backgroundColor = "#4ecca3"; // Verde
-            } catch (error) {
-                feedbackPanel.innerHTML = "ERROR: No se encontraron los archivos (model.json, weights.bin, etc). Revisa la consola.";
-                feedbackPanel.style.backgroundColor = "#e94560"; // Rojo
-                console.error(error);
-            }
-        }
-
-        function stop() {
-            running = false;
-            predicting = false;
-            lastPose = null;
-            lastIsCorrect = true;
-            if (rafId !== null) {
-                cancelAnimationFrame(rafId);
-                rafId = null;
-            }
-
-            try {
-                if (webcam && typeof webcam.stop === "function") {
-                    webcam.stop();
-                }
-                if (webcam && webcam.webcam && webcam.webcam.srcObject) {
-                    const tracks = webcam.webcam.srcObject.getTracks ? webcam.webcam.srcObject.getTracks() : [];
-                    tracks.forEach(t => t.stop());
-                }
+                await tf.ready();
             } catch (e) {
-                
             }
 
-            feedbackPanel.innerHTML = "Detenido. Puedes volver a iniciar.";
-            feedbackPanel.style.backgroundColor = "#555";
-        }
+            model = await tmPose.load(modelURL, metadataURL);
+            maxPredictions = model.getTotalClasses();
 
-        window.addEventListener("beforeunload", () => {
-            stop();
-        });
+            const camW = 384;
+            const camH = 288;
+            const flip = true;
+            webcam = new tmPose.Webcam(camW, camH, flip);
+            await webcam.setup();
+            await webcam.play();
 
-        async function loop(timestamp) {
-            if (!running) return;
-            try {
-                webcam.update();
-            } catch (e) {
-                console.error(e);
-            }
-
-            if (webcam.canvas && ctx) {
-                ctx.drawImage(webcam.canvas, 0, 0);
-                if (lastPose) {
-                    drawOverlay(lastPose, lastIsCorrect);
-                }
-            }
-
-            if (!predicting && (timestamp - lastPredictMs >= PREDICT_MS)) {
-                predicting = true;
-                lastPredictMs = timestamp;
-                predict(timestamp)
-                    .catch(e => console.error(e))
-                    .finally(() => { predicting = false; });
-            }
+            document.getElementById("placeholder-box").style.display = "none";
+            running = true;
             rafId = window.requestAnimationFrame(loop);
-        }
 
-        function calculateAngle(a, b, c) {
-            if (!a || !b || !c) return 0;
-            let radians = Math.atan2(c.position.y - b.position.y, c.position.x - b.position.x) - Math.atan2(a.position.y - b.position.y, a.position.x - b.position.x);
-            let angle = Math.abs(radians * 180.0 / Math.PI);
-            if (angle > 180.0) {
-                angle = 360 - angle;
-            }
-            return angle;
-        }
+            const canvas = document.getElementById("canvas");
+            canvas.width = camW;
+            canvas.height = camH;
+            ctx = canvas.getContext("2d");
 
-        function distance(a, b) {
-            if (!a || !b) return 0;
-            const dx = a.position.x - b.position.x;
-            const dy = a.position.y - b.position.y;
-            return Math.hypot(dx, dy);
-        }
+            labelContainer = document.getElementById("label-container");
+            labelContainer.innerHTML = "";
+            for (let i = 0; i < maxPredictions; i++) {
+                let row = document.createElement("div");
+                row.className = "metric-row";
 
-        function getPoint(keypoints, partName, minScore = KP_MIN_DEFAULT) {
-            return keypoints.find(k => k.part === partName && k.score >= minScore);
-        }
+                let header = document.createElement("div");
+                header.className = "metric-header";
 
-        function poseQuality(keypoints) {
-            const parts = [
-                "leftShoulder", "rightShoulder",
-                "leftElbow", "rightElbow",
-                "leftWrist", "rightWrist",
-                "leftHip", "rightHip",
-                "leftKnee", "rightKnee",
-                "leftAnkle", "rightAnkle",
-            ];
-            let sum = 0;
-            let count = 0;
-            for (const p of parts) {
-                const kp = keypoints.find(k => k.part === p);
-                if (kp) {
-                    sum += kp.score;
-                    count += 1;
-                }
-            }
-            return count ? (sum / count) : 0;
-        }
+                let nameElem = document.createElement("span");
+                nameElem.className = "metric-name";
+                nameElem.innerText = "...";
 
-        function poseQualityUpper(keypoints) {
-            const parts = [
-                "leftShoulder", "rightShoulder",
-                "leftElbow", "rightElbow",
-                "leftWrist", "rightWrist",
-                "leftHip", "rightHip",
-            ];
-            let sum = 0;
-            let count = 0;
-            for (const p of parts) {
-                const kp = keypoints.find(k => k.part === p);
-                if (kp) {
-                    sum += kp.score;
-                    count += 1;
-                }
-            }
-            return count ? (sum / count) : 0;
-        }
+                let valElem = document.createElement("span");
+                valElem.className = "metric-value";
+                valElem.innerText = "0%";
 
-        function poseQualityLower(keypoints) {
-            const parts = [
-                "leftHip", "rightHip",
-                "leftKnee", "rightKnee",
-                "leftAnkle", "rightAnkle",
-            ];
-            let sum = 0;
-            let count = 0;
-            for (const p of parts) {
-                const kp = keypoints.find(k => k.part === p);
-                if (kp) {
-                    sum += kp.score;
-                    count += 1;
-                }
-            }
-            return count ? (sum / count) : 0;
-        }
+                header.appendChild(nameElem);
+                header.appendChild(valElem);
 
-        function plankHintFromKeypoints(keypoints) {
-            const shoulder = getPoint(keypoints, "leftShoulder", KP_MIN_DEFAULT) || getPoint(keypoints, "rightShoulder", KP_MIN_DEFAULT);
-            const hip = getPoint(keypoints, "leftHip", KP_MIN_DEFAULT) || getPoint(keypoints, "rightHip", KP_MIN_DEFAULT);
-            const ankle = getPoint(keypoints, "leftAnkle", KP_MIN_LEG) || getPoint(keypoints, "rightAnkle", KP_MIN_LEG);
-            const knee = getPoint(keypoints, "leftKnee", KP_MIN_DEFAULT) || getPoint(keypoints, "rightKnee", KP_MIN_DEFAULT);
-            const legPoint = ankle || knee;
+                let barBg = document.createElement("div");
+                barBg.className = "metric-bar-bg";
 
-            if (!shoulder || !hip || !legPoint) {
-                return { likely: false, strength: 0, angle: 0 };
+                let barFill = document.createElement("div");
+                barFill.className = "metric-bar-fill";
+                barBg.appendChild(barFill);
+
+                row.appendChild(header);
+                row.appendChild(barBg);
+                labelContainer.appendChild(row);
             }
 
-            const angle = calculateAngle(shoulder, hip, legPoint);
-            const torso = distance(shoulder, hip) || 1;
-            const legDy = Math.abs(legPoint.position.y - hip.position.y);
+            statusText.innerText = "¡Listo! Empieza a moverte.";
+            statusPanel.className = "good";
+            statusPanel.querySelector("i").className = "fa-solid fa-check";
+            document.getElementById("placeholder-box").style.display = "none";
+        } catch (error) {
+            statusText.innerText = "ERROR: No se encontraron los archivos del modelo (Revisa la consola).";
+            statusPanel.className = "bad";
+            statusPanel.querySelector("i").className = "fa-solid fa-triangle-exclamation";
+            console.error(error);
+        }
+    }
 
+    function stop() {
+        running = false;
+        predicting = false;
+        lastPose = null;
+        lastIsCorrect = true;
+        smoothedProbs = null;
+        lockedExercise = null;
+        stableCandidate = null;
+        stableCount = 0;
+        missCount = 0;
+        idleCount = 0;
 
-            const heightOk = (legDy / torso) < 1.25;
-            const straightOk = angle > 168;
-
-            const strength = (straightOk ? 0.6 : 0) + (heightOk ? 0.4 : 0);
-            return { likely: straightOk && heightOk, strength, angle };
+        if (rafId !== null) {
+            cancelAnimationFrame(rafId);
+            rafId = null;
         }
 
-        function normalizeProbs(arr) {
-            const sum = arr.reduce((a, b) => a + b, 0);
-            if (!sum) return arr;
-            return arr.map(v => v / sum);
+        try {
+            if (webcam && typeof webcam.stop === "function") {
+                webcam.stop();
+            }
+            if (webcam && webcam.webcam && webcam.webcam.srcObject) {
+                const tracks = webcam.webcam.srcObject.getTracks ? webcam.webcam.srcObject.getTracks() : [];
+                tracks.forEach(t => t.stop());
+            }
+        } catch (e) {
         }
 
-        function applyHeuristics(rawProbs, classNames, keypoints) {
-            const probs = rawProbs.slice();
+        statusText.innerText = "Detenido. Puedes volver a iniciar.";
+        statusPanel.className = "";
+        statusPanel.querySelector("i").className = "fa-solid fa-video-slash";
+        document.getElementById("placeholder-box").style.display = "flex";
+    }
 
-            const lHip = getPoint(keypoints, "leftHip", KP_MIN_DEFAULT);
-            const rHip = getPoint(keypoints, "rightHip", KP_MIN_DEFAULT);
-            const lKnee = getPoint(keypoints, "leftKnee", KP_MIN_DEFAULT);
-            const rKnee = getPoint(keypoints, "rightKnee", KP_MIN_DEFAULT);
-            const lAnkle = getPoint(keypoints, "leftAnkle", KP_MIN_LEG);
-            const rAnkle = getPoint(keypoints, "rightAnkle", KP_MIN_LEG);
+    window.addEventListener("beforeunload", () => {
+        stop();
+    });
 
-            let kneeAngle = null;
-            const hip = lHip || rHip;
-            const knee = lKnee || rKnee;
-            const ankle = lAnkle || rAnkle;
-            if (hip && knee && ankle) {
-                kneeAngle = calculateAngle(hip, knee, ankle);
-            }
+    async function loop(timestamp) {
+        if (!running) return;
 
-            const shoulder = getPoint(keypoints, "leftShoulder", KP_MIN_DEFAULT) || getPoint(keypoints, "rightShoulder", KP_MIN_DEFAULT);
-            let plankAngle = null;
-            const legPointForPlank = ankle || knee;
-            if (shoulder && hip && legPointForPlank) {
-                plankAngle = calculateAngle(shoulder, hip, legPointForPlank);
-            }
-
-            const isLikelySquat = kneeAngle !== null && kneeAngle < 125;
-            const hint = plankHintFromKeypoints(keypoints);
-            const isLikelyPlank = hint.likely || (plankAngle !== null && plankAngle > 167);
-
-            for (let i = 0; i < classNames.length; i++) {
-                const name = (classNames[i] || "").toLowerCase();
-
-                if ((name.includes("squat") || name.includes("squad")) && isLikelySquat) {
-                    probs[i] *= 1.45;
-                }
-                if (name.includes("plank") && isLikelyPlank) {
-                    probs[i] *= hint.likely ? 2.10 : 1.55;
-                }
-
-                if ((name.includes("curl") || name.includes("bicep")) && (isLikelySquat || isLikelyPlank)) {
-                    probs[i] *= 0.65;
-                }
-            }
-
-            return normalizeProbs(probs);
+        try {
+            webcam.update();
+        } catch (e) {
+            console.error(e);
         }
 
-        function top2FromProbs(probs) {
-            let bestI = 0;
-            let bestV = -1;
-            let secondI = 0;
-            let secondV = -1;
+        if (webcam.canvas && ctx) {
+            ctx.drawImage(webcam.canvas, 0, 0);
+            if (lastPose) {
+                drawOverlay(lastPose, lastIsCorrect);
+            }
+        }
 
+        if (!predicting && (timestamp - lastPredictMs >= PREDICT_MS)) {
+            predicting = true;
+            lastPredictMs = timestamp;
+            predict(timestamp)
+                .catch(e => console.error(e))
+                .finally(() => { predicting = false; });
+        }
+
+        rafId = window.requestAnimationFrame(loop);
+    }
+
+    function calculateAngle(a, b, c) {
+        if (!a || !b || !c) return 0;
+        let radians = Math.atan2(c.position.y - b.position.y, c.position.x - b.position.x) - Math.atan2(a.position.y - b.position.y, a.position.x - b.position.x);
+        let angle = Math.abs(radians * 180.0 / Math.PI);
+        if (angle > 180.0) {
+            angle = 360 - angle;
+        }
+        return angle;
+    }
+
+    function distance(a, b) {
+        if (!a || !b) return 0;
+        const dx = a.position.x - b.position.x;
+        const dy = a.position.y - b.position.y;
+        return Math.hypot(dx, dy);
+    }
+
+    function getPoint(keypoints, partName, minScore = KP_MIN_DEFAULT) {
+        return keypoints.find(k => k.part === partName && k.score >= minScore);
+    }
+
+    function poseQuality(keypoints) {
+        const parts = [
+            "leftShoulder", "rightShoulder",
+            "leftElbow", "rightElbow",
+            "leftWrist", "rightWrist",
+            "leftHip", "rightHip",
+            "leftKnee", "rightKnee",
+            "leftAnkle", "rightAnkle",
+        ];
+        let sum = 0;
+        let count = 0;
+        for (const p of parts) {
+            const kp = keypoints.find(k => k.part === p);
+            if (kp) {
+                sum += kp.score;
+                count += 1;
+            }
+        }
+        return count ? (sum / count) : 0;
+    }
+
+    function poseQualityUpper(keypoints) {
+        const parts = [
+            "leftShoulder", "rightShoulder",
+            "leftElbow", "rightElbow",
+            "leftWrist", "rightWrist",
+            "leftHip", "rightHip",
+        ];
+        let sum = 0;
+        let count = 0;
+        for (const p of parts) {
+            const kp = keypoints.find(k => k.part === p);
+            if (kp) {
+                sum += kp.score;
+                count += 1;
+            }
+        }
+        return count ? (sum / count) : 0;
+    }
+
+    function poseQualityLower(keypoints) {
+        const parts = [
+            "leftHip", "rightHip",
+            "leftKnee", "rightKnee",
+            "leftAnkle", "rightAnkle",
+        ];
+        let sum = 0;
+        let count = 0;
+        for (const p of parts) {
+            const kp = keypoints.find(k => k.part === p);
+            if (kp) {
+                sum += kp.score;
+                count += 1;
+            }
+        }
+        return count ? (sum / count) : 0;
+    }
+
+    function poseMotionScore(currentKeypoints, previousKeypoints) {
+        const parts = [
+            "leftShoulder", "rightShoulder",
+            "leftElbow", "rightElbow",
+            "leftWrist", "rightWrist",
+            "leftHip", "rightHip",
+            "leftKnee", "rightKnee",
+            "leftAnkle", "rightAnkle",
+        ];
+
+        let sum = 0;
+        let count = 0;
+
+        for (const part of parts) {
+            const current = currentKeypoints.find(k => k.part === part);
+            const previous = previousKeypoints.find(k => k.part === part);
+            if (current && previous && current.score >= 0.20 && previous.score >= 0.20) {
+                sum += distance(current, previous);
+                count += 1;
+            }
+        }
+
+        if (!count) return Infinity;
+
+        const currentShoulder = currentKeypoints.find(k => k.part === "leftShoulder" && k.score >= KP_MIN_DEFAULT)
+            || currentKeypoints.find(k => k.part === "rightShoulder" && k.score >= KP_MIN_DEFAULT);
+        const currentHip = currentKeypoints.find(k => k.part === "leftHip" && k.score >= KP_MIN_DEFAULT)
+            || currentKeypoints.find(k => k.part === "rightHip" && k.score >= KP_MIN_DEFAULT);
+        const previousShoulder = previousKeypoints.find(k => k.part === "leftShoulder" && k.score >= KP_MIN_DEFAULT)
+            || previousKeypoints.find(k => k.part === "rightShoulder" && k.score >= KP_MIN_DEFAULT);
+        const previousHip = previousKeypoints.find(k => k.part === "leftHip" && k.score >= KP_MIN_DEFAULT)
+            || previousKeypoints.find(k => k.part === "rightHip" && k.score >= KP_MIN_DEFAULT);
+
+        const torsoNow = (currentShoulder && currentHip) ? distance(currentShoulder, currentHip) : 0;
+        const torsoPrev = (previousShoulder && previousHip) ? distance(previousShoulder, previousHip) : 0;
+        const scale = Math.max((torsoNow + torsoPrev) / 2, 40);
+
+        return (sum / count) / scale;
+    }
+
+    function plankHintFromKeypoints(keypoints) {
+        const shoulder = getPoint(keypoints, "leftShoulder", KP_MIN_DEFAULT) || getPoint(keypoints, "rightShoulder", KP_MIN_DEFAULT);
+        const hip = getPoint(keypoints, "leftHip", KP_MIN_DEFAULT) || getPoint(keypoints, "rightHip", KP_MIN_DEFAULT);
+        const ankle = getPoint(keypoints, "leftAnkle", KP_MIN_LEG) || getPoint(keypoints, "rightAnkle", KP_MIN_LEG);
+        const knee = getPoint(keypoints, "leftKnee", KP_MIN_DEFAULT) || getPoint(keypoints, "rightKnee", KP_MIN_DEFAULT);
+        const legPoint = ankle || knee;
+
+        if (!shoulder || !hip || !legPoint) {
+            return { likely: false, strength: 0, angle: 0 };
+        }
+
+        const angle = calculateAngle(shoulder, hip, legPoint);
+        const torso = distance(shoulder, hip) || 1;
+        const legDy = Math.abs(legPoint.position.y - hip.position.y);
+
+        const heightOk = (legDy / torso) < 1.35;
+        const straightOk = angle > 162;
+
+        const strength = (straightOk ? 0.6 : 0) + (heightOk ? 0.4 : 0);
+        return { likely: straightOk && heightOk, strength, angle };
+    }
+
+    function normalizeProbs(arr) {
+        const sum = arr.reduce((a, b) => a + b, 0);
+        if (!sum) return arr;
+        return arr.map(v => v / sum);
+    }
+
+    function normalizeClassName(name) {
+        const value = (name || "").trim();
+        return value.toLowerCase() === "squad" ? "squat" : value;
+    }
+
+    function applyHeuristics(rawProbs, classNames, keypoints) {
+        const probs = rawProbs.slice();
+
+        const lHip = getPoint(keypoints, "leftHip", KP_MIN_DEFAULT);
+        const rHip = getPoint(keypoints, "rightHip", KP_MIN_DEFAULT);
+        const lKnee = getPoint(keypoints, "leftKnee", KP_MIN_DEFAULT);
+        const rKnee = getPoint(keypoints, "rightKnee", KP_MIN_DEFAULT);
+        const lAnkle = getPoint(keypoints, "leftAnkle", KP_MIN_LEG);
+        const rAnkle = getPoint(keypoints, "rightAnkle", KP_MIN_LEG);
+
+        let kneeAngle = null;
+        const hip = lHip || rHip;
+        const knee = lKnee || rKnee;
+        const ankle = lAnkle || rAnkle;
+
+        if (hip && knee && ankle) {
+            kneeAngle = calculateAngle(hip, knee, ankle);
+        }
+
+        const shoulder = getPoint(keypoints, "leftShoulder", KP_MIN_DEFAULT) || getPoint(keypoints, "rightShoulder", KP_MIN_DEFAULT);
+        let plankAngle = null;
+        const legPointForPlank = ankle || knee;
+
+        if (shoulder && hip && legPointForPlank) {
+            plankAngle = calculateAngle(shoulder, hip, legPointForPlank);
+        }
+
+        const isLikelySquat = kneeAngle !== null && kneeAngle < 125;
+        const hint = plankHintFromKeypoints(keypoints);
+        const isLikelyPlank = hint.likely || (plankAngle !== null && plankAngle > 162);
+
+        const elbow = getPoint(keypoints, "leftElbow", KP_MIN_DEFAULT) || getPoint(keypoints, "rightElbow", KP_MIN_DEFAULT);
+        const wrist = getPoint(keypoints, "leftWrist", KP_MIN_DEFAULT) || getPoint(keypoints, "rightWrist", KP_MIN_DEFAULT);
+        let isLikelyRussian = false;
+        if (shoulder && hip && (elbow || wrist)) {
+            const torsoLean = Math.abs(shoulder.position.x - hip.position.x);
+            const torsoHeight = Math.abs(shoulder.position.y - hip.position.y) || 1;
+            const leanRatio = torsoLean / torsoHeight;
+            isLikelyRussian = leanRatio > 0.14 && leanRatio < 1.25;
+        }
+
+        for (let i = 0; i < classNames.length; i++) {
+            const name = (classNames[i] || "").toLowerCase();
+
+            if ((name.includes("squat") || name.includes("squad")) && isLikelySquat) {
+                probs[i] *= 1.25;
+            }
+
+            if (name.includes("plank") && isLikelyPlank) {
+                probs[i] *= hint.likely ? 1.35 : 1.20;
+            }
+
+            if ((name.includes("curl") || name.includes("bicep")) && (isLikelySquat || isLikelyPlank)) {
+                probs[i] *= 0.92;
+            }
+
+            if ((name.includes("curl") || name.includes("bicep")) && !isLikelySquat && !isLikelyPlank && shoulder && elbow) {
+                probs[i] *= 1.08;
+            }
+
+            if ((name.includes("russian") || name.includes("twist")) && (shoulder && hip)) {
+                probs[i] *= isLikelyRussian ? 1.05 : 0.78;
+            }
+        }
+
+        return normalizeProbs(probs);
+    }
+
+    function top2FromProbs(probs) {
+        let bestI = 0;
+        let bestV = -1;
+        let secondI = 0;
+        let secondV = -1;
+
+        for (let i = 0; i < probs.length; i++) {
+            const v = probs[i];
+            if (v > bestV) {
+                secondV = bestV;
+                secondI = bestI;
+                bestV = v;
+                bestI = i;
+            } else if (v > secondV) {
+                secondV = v;
+                secondI = i;
+            }
+        }
+
+        return { bestI, bestV, secondI, secondV };
+    }
+
+    async function predict(nowMs) {
+        const { pose, posenetOutput } = await model.estimatePose(webcam.canvas);
+        const prediction = await model.predict(posenetOutput);
+
+        const classNames = prediction.map(p => normalizeClassName(p.className));
+        const rawProbs = prediction.map(p => p.probability);
+
+        let detectedExercise = "";
+        let highestProbability = 0;
+        let secondProbability = 0;
+
+        const kp = pose ? pose.keypoints : null;
+        const quality = kp ? poseQuality(kp) : 0;
+        const upperQ = kp ? poseQualityUpper(kp) : 0;
+        const lowerQ = kp ? poseQualityLower(kp) : 0;
+        const plankHint = kp ? plankHintFromKeypoints(kp) : { likely: false, strength: 0, angle: 0 };
+        const motionScore = (kp && lastPose && lastPose.keypoints) ? poseMotionScore(kp, lastPose.keypoints) : Infinity;
+
+        let probs = rawProbs;
+        if (kp && (quality >= POSE_QUALITY_MIN || upperQ >= POSE_QUALITY_UPPER_MIN)) {
+            probs = applyHeuristics(rawProbs, classNames, kp);
+        }
+
+        if (smoothedProbs === null || smoothedProbs.length !== probs.length) {
+            smoothedProbs = probs.slice();
+        } else {
             for (let i = 0; i < probs.length; i++) {
-                const v = probs[i];
-                if (v > bestV) {
-                    secondV = bestV;
-                    secondI = bestI;
-                    bestV = v;
-                    bestI = i;
-                } else if (v > secondV) {
-                    secondV = v;
-                    secondI = i;
-                }
+                smoothedProbs[i] = smoothedProbs[i] * (1 - SMOOTH_ALPHA) + probs[i] * SMOOTH_ALPHA;
             }
-            return { bestI, bestV, secondI, secondV };
+            smoothedProbs = normalizeProbs(smoothedProbs);
         }
 
-        async function predict(nowMs) {
-            const { pose, posenetOutput } = await model.estimatePose(webcam.canvas);
-            const prediction = await model.predict(posenetOutput);
+        const { bestI, bestV, secondV } = top2FromProbs(smoothedProbs);
+        detectedExercise = classNames[bestI];
+        highestProbability = bestV;
+        secondProbability = secondV;
 
-            const classNames = prediction.map(p => p.className);
-            const rawProbs = prediction.map(p => p.probability);
-
-            let detectedExercise = "";
-            let highestProbability = 0;
-            let secondProbability = 0;
-
-            const kp = pose ? pose.keypoints : null;
-            const quality = kp ? poseQuality(kp) : 0;
-            const upperQ = kp ? poseQualityUpper(kp) : 0;
-            const lowerQ = kp ? poseQualityLower(kp) : 0;
-            const plankHint = kp ? plankHintFromKeypoints(kp) : { likely: false, strength: 0, angle: 0 };
-
-            let probs = rawProbs;
-            if (kp && (quality >= POSE_QUALITY_MIN || upperQ >= POSE_QUALITY_UPPER_MIN)) {
-                probs = applyHeuristics(rawProbs, classNames, kp);
-            }
-
-            if (smoothedProbs === null || smoothedProbs.length !== probs.length) {
-                smoothedProbs = probs.slice();
-            } else {
-                for (let i = 0; i < probs.length; i++) {
-                    smoothedProbs[i] = smoothedProbs[i] * (1 - SMOOTH_ALPHA) + probs[i] * SMOOTH_ALPHA;
+        if (kp && plankHint.likely) {
+            const plankIdx = classNames.findIndex(n => (n || "").toLowerCase().includes("plank"));
+            if (plankIdx >= 0) {
+                const plankProb = smoothedProbs[plankIdx];
+                if (plankProb >= 0.34 && (plankProb > highestProbability - 0.10)) {
+                    secondProbability = Math.max(secondProbability, highestProbability);
+                    detectedExercise = classNames[plankIdx];
+                    highestProbability = plankProb;
                 }
-                smoothedProbs = normalizeProbs(smoothedProbs);
-            }
-
-            const { bestI, bestV, secondV } = top2FromProbs(smoothedProbs);
-            detectedExercise = classNames[bestI];
-            highestProbability = bestV;
-            secondProbability = secondV;
-
-            if (kp && plankHint.likely) {
-                const plankIdx = classNames.findIndex(n => (n || "").toLowerCase().includes("plank"));
-                if (plankIdx >= 0) {
-                    const plankProb = smoothedProbs[plankIdx];
-                    // Si plank está bastante alto y cerca del top1, lo tomamos como ejercicio actual
-                    if (plankProb >= 0.40 && (plankProb > highestProbability - 0.06)) {
-                        secondProbability = Math.max(secondProbability, highestProbability);
-                        detectedExercise = classNames[plankIdx];
-                        highestProbability = plankProb;
-                    }
-                }
-            }
-
-            if (nowMs - lastUiUpdateMs > 250) {
-                lastUiUpdateMs = nowMs;
-                for (let i = 0; i < maxPredictions; i++) {
-                    const className = classNames[i];
-                    const prob = smoothedProbs[i];
-                    labelContainer.childNodes[i].innerHTML = `${className}: ${(prob * 100).toFixed(0)}%`;
-                }
-            }
-
-            let isCorrect = true;
-            let message = "Analizando postura...";
-
-            const isPlankCandidate = (detectedExercise || "").toLowerCase().includes("plank") || (plankHint && plankHint.likely);
-            const confThreshold = isPlankCandidate ? MIN_TOP1_CONF_PLANK : MIN_TOP1_CONF;
-            const marginThreshold = isPlankCandidate ? MIN_TOP1_MARGIN_PLANK : MIN_TOP1_MARGIN;
-
-            const marginOk = (highestProbability - secondProbability) >= marginThreshold;
-            const confOk = highestProbability >= confThreshold;
-            const poseOk = kp && (quality >= POSE_QUALITY_MIN || upperQ >= POSE_QUALITY_UPPER_MIN);
-
-            let chosenExercise = null;
-            if (poseOk && confOk && marginOk) {
-                if (stableCandidate === detectedExercise) {
-                    stableCount += 1;
-                } else {
-                    stableCandidate = detectedExercise;
-                    stableCount = 1;
-                }
-                if (stableCount >= STABLE_FRAMES_REQUIRED) {
-                    lockedExercise = detectedExercise;
-                }
-                chosenExercise = lockedExercise || detectedExercise;
-            }
-
-            if (pose && chosenExercise) {
-                let exerciseLower = chosenExercise.toLowerCase();
-                const keypoints = pose.keypoints;
-
-                // 1. CURL DE BICEP
-                if (exerciseLower.includes("curl") || exerciseLower.includes("bicep")) {
-                    const shoulder = getPoint(keypoints, "leftShoulder") || getPoint(keypoints, "rightShoulder");
-                    const elbow = getPoint(keypoints, "leftElbow") || getPoint(keypoints, "rightElbow");
-                    
-                    if (shoulder && elbow) {
-                        if (elbow.position.x < shoulder.position.x - 30) {
-                            message = "CURL BÍCEP: ERROR - Pega tu codo al torso, no te balancees.";
-                            isCorrect = false;
-                        } else {
-                            message = "CURL BÍCEP: Postura excelente.";
-                        }
-                    } else {
-                        message = "CURL BÍCEP: (Por favor, muestra tu brazo a la cámara)";
-                    }
-                
-                // 2. SQUAT (SENTADILLAS)
-                } else if (exerciseLower.includes("squat") || exerciseLower.includes("squad")) {
-                    const hip = getPoint(keypoints, "leftHip", KP_MIN_DEFAULT) || getPoint(keypoints, "rightHip", KP_MIN_DEFAULT);
-                    const knee = getPoint(keypoints, "leftKnee", KP_MIN_DEFAULT) || getPoint(keypoints, "rightKnee", KP_MIN_DEFAULT);
-                    const ankle = getPoint(keypoints, "leftAnkle", KP_MIN_LEG) || getPoint(keypoints, "rightAnkle", KP_MIN_LEG);
-                    
-                    if (hip && knee && ankle) {
-                        const angle = calculateAngle(hip, knee, ankle);
-                        if (angle < 60) {
-                            message = "SQUAT: ERROR - Estás bajando demasiado las caderas.";
-                            isCorrect = false;
-                        } else {
-                            message = "SQUAT: Buen rango de profundidad.";
-                        }
-                    } else {
-                        message = "SQUAT: (Alejate para que se vean tus piernas)";
-                    }
-
-                // 3. PLANK (PLANCHA)
-                } else if (exerciseLower.includes("plank")) {
-                    const shoulder = getPoint(keypoints, "leftShoulder", KP_MIN_DEFAULT) || getPoint(keypoints, "rightShoulder", KP_MIN_DEFAULT);
-                    const hip = getPoint(keypoints, "leftHip", KP_MIN_DEFAULT) || getPoint(keypoints, "rightHip", KP_MIN_DEFAULT);
-                    const ankle = getPoint(keypoints, "leftAnkle", KP_MIN_LEG) || getPoint(keypoints, "rightAnkle", KP_MIN_LEG);
-                    const knee = getPoint(keypoints, "leftKnee", KP_MIN_DEFAULT) || getPoint(keypoints, "rightKnee", KP_MIN_DEFAULT);
-                    const legPoint = ankle || knee;
-                    
-                    if (shoulder && hip && legPoint) {
-                        const angle = calculateAngle(shoulder, hip, legPoint);
-                        if (angle < 160) { 
-                            if (hip.position.y < shoulder.position.y) {
-                                message = "PLANK: ERROR - Baja la cadera, estás muy arriba.";
-                            } else {
-                                message = "PLANK: ERROR - Sube la cadera, te estás cayendo al piso.";
-                            }
-                            isCorrect = false;
-                        } else {
-                            message = "PLANK: Línea recta mantenida. ¡Perfecto!";
-                        }
-                    } else {
-                        message = "PLANK: (Ponte de lado y que se vea el cuerpo completo, especialmente piernas)";
-                    }
-
-                // 4. RUSSIAN TWIST
-                } else if (exerciseLower.includes("russian") || exerciseLower.includes("twist")) {
-                    const shoulder = getPoint(keypoints, "leftShoulder", KP_MIN_DEFAULT) || getPoint(keypoints, "rightShoulder", KP_MIN_DEFAULT);
-                    const hip = getPoint(keypoints, "leftHip", KP_MIN_DEFAULT) || getPoint(keypoints, "rightHip", KP_MIN_DEFAULT);
-                    
-                    if (shoulder && hip) {
-                        let diffX = Math.abs(shoulder.position.x - hip.position.x);
-                        if (diffX < 25) { 
-                            message = "RUSSIAN TWIST: ERROR - Inclina tu espalda más hacia atrás (~45°).";
-                            isCorrect = false;
-                        } else {
-                            message = "RUSSIAN TWIST: Inclinación correcta. Sigue.";
-                        }
-                    }
-                } else {
-                    message = `Detectado: ${chosenExercise}`;
-                }
-            } else {
-                if (!pose || !kp) {
-                    message = "No veo tu cuerpo. Ponte frente a la cámara.";
-                } else if (quality < POSE_QUALITY_MIN && upperQ < POSE_QUALITY_UPPER_MIN) {
-                    message = "Poca visibilidad. Mejor luz y que se vea el cuerpo.";
-                } else {
-                    message = "Inconcluso: mantén la postura 1-2s.";
-                }
-                isCorrect = true; 
-            }
-
-            feedbackPanel.innerHTML = message;
-            if (debugEl) {
-                const locked = lockedExercise ? lockedExercise : "(none)";
-                debugEl.textContent = `Locked: ${locked} | top1=${(highestProbability * 100).toFixed(0)}% | margin=${((highestProbability - secondProbability) * 100).toFixed(0)}% | upper=${(upperQ*100).toFixed(0)}% | lower=${(lowerQ*100).toFixed(0)}% | plankHint=${plankHint.likely ? "yes" : "no"}(${(plankHint.strength*100).toFixed(0)}%)`;
-            }
-            if (poseOk && confOk && marginOk) {
-                feedbackPanel.style.backgroundColor = isCorrect ? "#4ecca3" : "#e94560"; 
-            } else {
-                feedbackPanel.style.backgroundColor = "#555"; 
-            }
-
-            lastPose = pose || null;
-            lastIsCorrect = !!isCorrect;
-
-            try {
-                if (posenetOutput && typeof posenetOutput.dispose === "function") {
-                    posenetOutput.dispose();
-                } else {
-                    tf.dispose(posenetOutput);
-                }
-            } catch (e) {
             }
         }
 
-        function drawOverlay(pose, isCorrect) {
-            if (!pose) return;
-            const minPartConfidence = 0.20;
-            const strokeColor = isCorrect ? "#4ecca3" : "#e94560"; 
-
-            ctx.fillStyle = strokeColor;
-            ctx.strokeStyle = strokeColor;
-            ctx.lineWidth = 4;
-
-            try {
-                tmPose.drawKeypoints(pose.keypoints, minPartConfidence, ctx);
-                tmPose.drawSkeleton(pose.keypoints, minPartConfidence, ctx);
-            } catch (e) {
+        if (nowMs - lastUiUpdateMs > 100) {
+            lastUiUpdateMs = nowMs;
+            for (let i = 0; i < maxPredictions; i++) {
+                const className = classNames[i];
+                const prob = smoothedProbs[i];
+                const row = labelContainer.childNodes[i];
+                if (row) {
+                    row.querySelector(".metric-name").innerText = className;
+                    row.querySelector(".metric-value").innerText = `${(prob * 100).toFixed(0)}%`;
+                    row.querySelector(".metric-bar-fill").style.width = `${prob * 100}%`;
+                }
             }
         }
-    </script>
+
+        let isCorrect = true;
+        let message = "Analizando postura...";
+        let panelMode = "warning";
+
+        const detectedLower = (detectedExercise || "").toLowerCase();
+        const isPlankCandidate = detectedLower.includes("plank") || (plankHint && plankHint.likely);
+        const isCurlCandidate = detectedLower.includes("curl") || detectedLower.includes("bicep");
+
+        const confThreshold = isPlankCandidate ? MIN_TOP1_CONF_PLANK : MIN_TOP1_CONF;
+        const marginThreshold = isPlankCandidate ? MIN_TOP1_MARGIN_PLANK : MIN_TOP1_MARGIN;
+
+        const marginOk = (highestProbability - secondProbability) >= marginThreshold;
+        const confOk = highestProbability >= confThreshold;
+        const poseOk = !!(kp && (quality >= POSE_QUALITY_MIN || upperQ >= POSE_QUALITY_UPPER_MIN));
+
+        const idleCandidate = poseOk &&
+            !isPlankCandidate &&
+            !isCurlCandidate &&
+            highestProbability < IDLE_CONF_MAX &&
+            motionScore <= IDLE_MOTION_THRESHOLD;
+
+        if (idleCandidate) {
+            idleCount += 1;
+        } else {
+            idleCount = 0;
+        }
+
+        const restActive = poseOk && idleCount >= IDLE_FRAMES_REQUIRED && !(confOk && marginOk);
+
+        if (lockedExercise && detectedExercise !== lockedExercise && poseOk && confOk) {
+            const switchMargin = Math.max(0.03, marginThreshold * 0.7);
+            if ((highestProbability - secondProbability) >= switchMargin) {
+                lockedExercise = null;
+                stableCandidate = detectedExercise;
+                stableCount = 1;
+            }
+        }
+
+        let chosenExercise = null;
+        if (restActive) {
+            lockedExercise = null;
+            stableCandidate = null;
+            stableCount = 0;
+            missCount = 0;
+            chosenExercise = "reposo";
+            panelMode = "idle";
+        } else if (poseOk && confOk && marginOk) {
+            missCount = 0;
+
+            if (stableCandidate === detectedExercise) {
+                stableCount += 1;
+            } else {
+                stableCandidate = detectedExercise;
+                stableCount = 1;
+            }
+
+            if (stableCount >= STABLE_FRAMES_REQUIRED) {
+                lockedExercise = detectedExercise;
+            }
+
+            chosenExercise = lockedExercise || detectedExercise;
+        } else {
+            missCount += 1;
+            if (missCount >= LOCK_RESET_AFTER_MISSES) {
+                lockedExercise = null;
+                stableCandidate = null;
+                stableCount = 0;
+            }
+        }
+
+        if (pose && chosenExercise) {
+            const exerciseLower = chosenExercise.toLowerCase();
+            const keypoints = pose.keypoints;
+
+            if (exerciseLower.includes("reposo")) {
+                message = "REPOSO: sin ejercicio activo. Cuando empieces un movimiento claro, te detectaré.";
+                isCorrect = true;
+                panelMode = "idle";
+
+            } else if (exerciseLower.includes("curl") || exerciseLower.includes("bicep")) {
+                const shoulder = getPoint(keypoints, "leftShoulder") || getPoint(keypoints, "rightShoulder");
+                const elbow = getPoint(keypoints, "leftElbow") || getPoint(keypoints, "rightElbow");
+
+                if (shoulder && elbow) {
+                    if (elbow.position.x < shoulder.position.x - 30) {
+                        message = "CURL BÍCEP: ERROR - Pega tu codo al torso, no te balancees.";
+                        isCorrect = false;
+                        panelMode = "bad";
+                    } else {
+                        message = "CURL BÍCEP: Postura excelente.";
+                        panelMode = "good";
+                    }
+                } else {
+                    message = "CURL BÍCEP: (Por favor, muestra tu brazo a la cámara)";
+                    panelMode = "warning";
+                }
+
+            } else if (exerciseLower.includes("squat") || exerciseLower.includes("squad")) {
+                const hip = getPoint(keypoints, "leftHip", KP_MIN_DEFAULT) || getPoint(keypoints, "rightHip", KP_MIN_DEFAULT);
+                const knee = getPoint(keypoints, "leftKnee", KP_MIN_DEFAULT) || getPoint(keypoints, "rightKnee", KP_MIN_DEFAULT);
+                const ankle = getPoint(keypoints, "leftAnkle", KP_MIN_LEG) || getPoint(keypoints, "rightAnkle", KP_MIN_LEG);
+
+                if (hip && knee && ankle) {
+                    const angle = calculateAngle(hip, knee, ankle);
+                    if (angle < 60) {
+                        message = "SQUAT: ERROR - Estás bajando demasiado las caderas.";
+                        isCorrect = false;
+                        panelMode = "bad";
+                    } else {
+                        message = "SQUAT: Buen rango de profundidad.";
+                        panelMode = "good";
+                    }
+                } else {
+                    message = "SQUAT: (Alejate para que se vean tus piernas)";
+                    panelMode = "warning";
+                }
+
+            } else if (exerciseLower.includes("plank")) {
+                const shoulder = getPoint(keypoints, "leftShoulder", KP_MIN_DEFAULT) || getPoint(keypoints, "rightShoulder", KP_MIN_DEFAULT);
+                const hip = getPoint(keypoints, "leftHip", KP_MIN_DEFAULT) || getPoint(keypoints, "rightHip", KP_MIN_DEFAULT);
+                const ankle = getPoint(keypoints, "leftAnkle", KP_MIN_LEG) || getPoint(keypoints, "rightAnkle", KP_MIN_LEG);
+                const knee = getPoint(keypoints, "leftKnee", KP_MIN_DEFAULT) || getPoint(keypoints, "rightKnee", KP_MIN_DEFAULT);
+                const legPoint = ankle || knee;
+
+                if (shoulder && hip && legPoint) {
+                    const angle = calculateAngle(shoulder, hip, legPoint);
+                    if (angle < 160) {
+                        if (hip.position.y < shoulder.position.y) {
+                            message = "PLANK: ERROR - Baja la cadera, estás muy arriba.";
+                        } else {
+                            message = "PLANK: ERROR - Sube la cadera, te estás cayendo al piso.";
+                        }
+                        isCorrect = false;
+                        panelMode = "bad";
+                    } else {
+                        message = "PLANK: Línea recta mantenida. ¡Perfecto!";
+                        panelMode = "good";
+                    }
+                } else {
+                    message = "PLANK: (Ponte de lado y que se vea el cuerpo completo, especialmente piernas)";
+                    panelMode = "warning";
+                }
+
+            } else if (exerciseLower.includes("russian") || exerciseLower.includes("twist")) {
+                const shoulder = getPoint(keypoints, "leftShoulder", KP_MIN_DEFAULT) || getPoint(keypoints, "rightShoulder", KP_MIN_DEFAULT);
+                const hip = getPoint(keypoints, "leftHip", KP_MIN_DEFAULT) || getPoint(keypoints, "rightHip", KP_MIN_DEFAULT);
+                const elbow = getPoint(keypoints, "leftElbow", KP_MIN_DEFAULT) || getPoint(keypoints, "rightElbow", KP_MIN_DEFAULT);
+                const wrist = getPoint(keypoints, "leftWrist", KP_MIN_DEFAULT) || getPoint(keypoints, "rightWrist", KP_MIN_DEFAULT);
+
+                if (shoulder && hip) {
+                    const torsoLean = Math.abs(shoulder.position.x - hip.position.x);
+                    const torsoHeight = Math.abs(shoulder.position.y - hip.position.y) || 1;
+                    const leanRatio = torsoLean / torsoHeight;
+                    const armVisible = elbow || wrist;
+
+                    if (leanRatio < 0.18) {
+                        message = "RUSSIAN TWIST: ERROR - Inclina más el torso hacia atrás.";
+                        isCorrect = false;
+                        panelMode = "bad";
+                    } else if (leanRatio > 1.20) {
+                        message = "RUSSIAN TWIST: ERROR - Te estás yendo demasiado hacia un lado.";
+                        isCorrect = false;
+                        panelMode = "bad";
+                    } else if (!armVisible) {
+                        message = "RUSSIAN TWIST: Muestra mejor brazos y torso para corregirte.";
+                        panelMode = "warning";
+                    } else {
+                        message = "RUSSIAN TWIST: Inclinación correcta. Sigue.";
+                        panelMode = "good";
+                    }
+                } else {
+                    message = "RUSSIAN TWIST: (Debo ver hombro y cadera)";
+                    panelMode = "warning";
+                }
+
+            } else {
+                message = `Detectado: ${chosenExercise}`;
+                panelMode = "good";
+            }
+        } else {
+            if (!pose || !kp) {
+                message = "No veo tu cuerpo. Ponte frente a la cámara.";
+                panelMode = "warning";
+            } else if (restActive) {
+                message = "REPOSO: sin ejercicio activo. Cuando empieces un movimiento claro, te detectaré.";
+                panelMode = "idle";
+            } else if (quality < POSE_QUALITY_MIN && upperQ < POSE_QUALITY_UPPER_MIN) {
+                message = "Poca visibilidad. Mejor luz y que se vea el cuerpo.";
+                panelMode = "warning";
+            } else {
+                message = "REPOSO: no detecto un ejercicio activo.";
+                panelMode = "idle";
+            }
+            isCorrect = true;
+        }
+
+        statusText.innerText = message;
+
+        if (debugEl) {
+            const locked = lockedExercise ? lockedExercise : "(none)";
+            debugEl.textContent = `Locked: ${locked} | top1=${(highestProbability * 100).toFixed(0)}% | margin=${((highestProbability - secondProbability) * 100).toFixed(0)}% | upper=${(upperQ * 100).toFixed(0)}% | lower=${(lowerQ * 100).toFixed(0)}% | motion=${motionScore === Infinity ? "inf" : motionScore.toFixed(2)} | idle=${idleCount} | plankHint=${plankHint.likely ? "yes" : "no"}(${(plankHint.strength * 100).toFixed(0)}%)`;
+        }
+
+        if (panelMode === "idle") {
+            statusPanel.className = "idle";
+            let icon = statusPanel.querySelector("i");
+            if (icon) icon.className = "fa-solid fa-bed";
+        } else if (poseOk && confOk && marginOk) {
+            statusPanel.className = isCorrect ? "good" : "bad";
+            let icon = statusPanel.querySelector("i");
+            if (icon) icon.className = isCorrect ? "fa-solid fa-check" : "fa-solid fa-triangle-exclamation";
+        } else {
+            statusPanel.className = "warning";
+            let icon = statusPanel.querySelector("i");
+            if (icon) icon.className = "fa-solid fa-wave-square";
+        }
+
+        lastPose = pose || null;
+        lastIsCorrect = !!isCorrect;
+
+        try {
+            if (posenetOutput && typeof posenetOutput.dispose === "function") {
+                posenetOutput.dispose();
+            } else {
+                tf.dispose(posenetOutput);
+            }
+        } catch (e) {
+        }
+    }
+
+    function drawOverlay(pose, isCorrect) {
+        if (!pose) return;
+        const minPartConfidence = 0.20;
+        const strokeColor = isCorrect ? "#4ecca3" : "#e94560";
+
+        ctx.fillStyle = strokeColor;
+        ctx.strokeStyle = strokeColor;
+        ctx.lineWidth = 4;
+
+        try {
+            tmPose.drawKeypoints(pose.keypoints, minPartConfidence, ctx);
+            tmPose.drawSkeleton(pose.keypoints, minPartConfidence, ctx);
+        } catch (e) {
+        }
+    }
+</script>
+
 </body>
 </html>
+
